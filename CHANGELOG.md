@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-06
+
 First release.
 
 ### Added
@@ -21,3 +23,6 @@ First release.
 - `cpf?` and `cnpj?` accept the masked or the raw form and nothing around it, verify both check digits and reject a repeated
   digit; the suite checks them against an independent implementation of the rule.
 - A test suite with 100% coverage.
+
+[Unreleased]: https://github.com/AF2B/borba-predicates-component/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/AF2B/borba-predicates-component/releases/tag/v1.0.0
