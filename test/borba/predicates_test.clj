@@ -1,275 +1,217 @@
 (ns borba.predicates-test
-  (:require [clojure.test :refer [deftest is testing]]
-            [borba.predicates :as pred]))
+  (:require
+   [borba.predicates :as pred]
+   [clojure.test :refer [are deftest is testing]]))
 
-;; ── String predicates ─────────────────────────────────────────────────────────
+;; ── Strings ──────────────────────────────────────────────────────────────
 
 (deftest blank?-test
-  (testing "nil is blank"
-    (is (pred/blank? nil)))
-  (testing "empty string is blank"
-    (is (pred/blank? "")))
-  (testing "whitespace-only string is blank"
-    (is (pred/blank? "   ")))
-  (testing "non-blank string is not blank"
-    (is (not (pred/blank? "hello"))))
-  (testing "number is not blank"
-    (is (not (pred/blank? 42)))))
+  (are [value] (true? (pred/blank? value))
+    nil "" "   " "\t\n")
+  (are [value] (false? (pred/blank? value))
+    "hello" " a " 42 :keyword []))
 
 (deftest present?-test
-  (testing "non-blank string is present"
-    (is (pred/present? "hello")))
-  (testing "nil is not present"
-    (is (not (pred/present? nil))))
-  (testing "empty string is not present"
-    (is (not (pred/present? ""))))
-  (testing "whitespace is not present"
-    (is (not (pred/present? "   "))))
-  (testing "number is not present"
-    (is (not (pred/present? 42)))))
+  (are [value] (true? (pred/present? value))
+    "hello" " a ")
+  (are [value] (false? (pred/present? value))
+    nil "" "   " 42 :keyword))
 
-(deftest min-length?-test
-  (testing "string meets minimum length"
-    (is (pred/min-length? "hello" 3)))
-  (testing "string exactly at minimum"
-    (is (pred/min-length? "hi" 2)))
-  (testing "string below minimum"
-    (is (not (pred/min-length? "hi" 5))))
-  (testing "nil returns false"
-    (is (not (pred/min-length? nil 1)))))
+(deftest length-test
+  (testing "min-length?"
+    (is (true? (pred/min-length? "hello" 3)))
+    (is (true? (pred/min-length? "hi" 2)))
+    (is (false? (pred/min-length? "hi" 5)))
+    (is (false? (pred/min-length? nil 1))))
 
-(deftest max-length?-test
-  (testing "string within max length"
-    (is (pred/max-length? "hi" 5)))
-  (testing "string exactly at max"
-    (is (pred/max-length? "hello" 5)))
-  (testing "string exceeds max"
-    (is (not (pred/max-length? "hello world" 5))))
-  (testing "nil returns false"
-    (is (not (pred/max-length? nil 5)))))
+  (testing "max-length?"
+    (is (true? (pred/max-length? "hi" 5)))
+    (is (true? (pred/max-length? "hello" 5)))
+    (is (false? (pred/max-length? "hello world" 5)))
+    (is (false? (pred/max-length? nil 5))))
 
-(deftest length-between?-test
-  (testing "string within range"
-    (is (pred/length-between? "hello" 3 10)))
-  (testing "string at lower bound"
-    (is (pred/length-between? "hi" 2 5)))
-  (testing "string at upper bound"
-    (is (pred/length-between? "hello" 3 5)))
-  (testing "string below range"
-    (is (not (pred/length-between? "hi" 5 10))))
-  (testing "string above range"
-    (is (not (pred/length-between? "hello world" 1 5)))))
+  (testing "length-between? includes both bounds"
+    (is (true? (pred/length-between? "hello" 3 10)))
+    (is (true? (pred/length-between? "hi" 2 5)))
+    (is (true? (pred/length-between? "hello" 3 5)))
+    (is (false? (pred/length-between? "hi" 5 10)))
+    (is (false? (pred/length-between? "hello world" 1 5)))))
 
 (deftest matches?-test
-  (testing "string matches pattern"
-    (is (pred/matches? "abc123" #"^[a-z]+\d+$")))
-  (testing "string does not match pattern"
-    (is (not (pred/matches? "123abc" #"^[a-z]+\d+$"))))
-  (testing "nil does not match"
-    (is (not (pred/matches? nil #".*")))))
+  (is (true? (pred/matches? "abc123" #"[a-z]+\d+")))
+  (is (false? (pred/matches? "123abc" #"[a-z]+\d+")))
+  (testing "the whole string has to match, not a part of it"
+    (is (false? (pred/matches? "abc123!" #"[a-z]+\d+"))))
+  (testing "a value that is not a string never matches"
+    (is (false? (pred/matches? nil #".*")))
+    (is (false? (pred/matches? 42 #".*")))))
 
-;; ── Format predicates ─────────────────────────────────────────────────────────
+;; ── Formats ──────────────────────────────────────────────────────────────
 
 (deftest email?-test
-  (testing "valid email"
-    (is (pred/email? "user@example.com")))
-  (testing "valid email with subdomain"
-    (is (pred/email? "user@mail.example.com")))
-  (testing "valid email with plus"
-    (is (pred/email? "user+tag@example.com")))
-  (testing "missing @ is invalid"
-    (is (not (pred/email? "userexample.com"))))
-  (testing "missing domain is invalid"
-    (is (not (pred/email? "user@"))))
-  (testing "nil is invalid"
-    (is (not (pred/email? nil)))))
+  (are [value] (true? (pred/email? value))
+    "user@example.com" "user@mail.example.com" "user+tag@example.com"
+    "first.last@example.co")
+  (are [value] (false? (pred/email? value))
+    "userexample.com" "user@" "@example.com" "user@example" nil 42
+    "user @example.com")
+
+  (testing "an address longer than a mailbox can have is refused"
+    (let [local (apply str (repeat 250 "a"))]
+      (is (false? (pred/email? (str local "@example.com")))))
+    (is (true? (pred/email? (str (apply str (repeat 240 "a"))
+                                 "@example.com"))))))
 
 (deftest uuid?-test
-  (testing "valid UUID"
-    (is (pred/uuid? "550e8400-e29b-41d4-a716-446655440000")))
-  (testing "invalid UUID format"
-    (is (not (pred/uuid? "not-a-uuid"))))
-  (testing "nil is invalid"
-    (is (not (pred/uuid? nil)))))
+  (are [value] (true? (pred/uuid? value))
+    "550e8400-e29b-41d4-a716-446655440000"
+    "550E8400-E29B-41D4-A716-446655440000"
+    (random-uuid))
+  (are [value] (false? (pred/uuid? value))
+    "not-a-uuid" "550e8400e29b41d4a716446655440000" nil 42
+    "550e8400-e29b-41d4-a716-44665544000"))
 
 (deftest url?-test
-  (testing "valid http URL"
-    (is (pred/url? "http://example.com")))
-  (testing "valid https URL"
-    (is (pred/url? "https://example.com/path?q=1")))
-  (testing "invalid URL without scheme"
-    (is (not (pred/url? "example.com"))))
-  (testing "nil is invalid"
-    (is (not (pred/url? nil)))))
+  (are [value] (true? (pred/url? value))
+    "http://example.com" "https://example.com/path?q=1"
+    "https://example.com:8080/a#b")
+  (are [value] (false? (pred/url? value))
+    "example.com" "ftp://example.com" "https://" "https://exa mple.com"
+    nil 42)
 
-;; ── Number predicates ─────────────────────────────────────────────────────────
+  (testing "a URL longer than a browser accepts is refused"
+    (is (false? (pred/url? (str "https://example.com/"
+                                (apply str (repeat 2048 "a"))))))))
 
-(deftest positive?-test
-  (testing "positive integer"
-    (is (pred/positive? 1)))
-  (testing "positive float"
-    (is (pred/positive? 0.1)))
-  (testing "zero is not positive"
-    (is (not (pred/positive? 0))))
-  (testing "negative is not positive"
-    (is (not (pred/positive? -1))))
-  (testing "nil is not positive"
-    (is (not (pred/positive? nil)))))
+;; ── Numbers ──────────────────────────────────────────────────────────────
 
-(deftest negative?-test
-  (testing "negative integer"
-    (is (pred/negative? -1)))
-  (testing "zero is not negative"
-    (is (not (pred/negative? 0))))
-  (testing "positive is not negative"
-    (is (not (pred/negative? 1)))))
+(deftest sign-test
+  (testing "positive?"
+    (are [value] (true? (pred/positive? value))
+      1 0.1 1/2 (bigdec 3))
+    (are [value] (false? (pred/positive? value))
+      0 -1 nil "1" Double/NaN))
 
-(deftest zero?-test
-  (testing "zero integer"
-    (is (pred/zero? 0)))
-  (testing "positive is not zero"
-    (is (not (pred/zero? 1))))
-  (testing "negative is not zero"
-    (is (not (pred/zero? -1)))))
+  (testing "negative?"
+    (are [value] (true? (pred/negative? value))
+      -1 -0.1)
+    (are [value] (false? (pred/negative? value))
+      0 1 nil "-1" Double/NaN))
 
-(deftest non-negative?-test
-  (testing "zero is non-negative"
-    (is (pred/non-negative? 0)))
-  (testing "positive is non-negative"
-    (is (pred/non-negative? 5)))
-  (testing "negative is not non-negative"
-    (is (not (pred/non-negative? -1)))))
+  (testing "zero?"
+    (are [value] (true? (pred/zero? value))
+      0 0.0 (bigdec 0))
+    (are [value] (false? (pred/zero? value))
+      1 -1 nil "0"))
+
+  (testing "non-negative?"
+    (are [value] (true? (pred/non-negative? value))
+      0 5 0.0)
+    (are [value] (false? (pred/non-negative? value))
+      -1 nil "5" Double/NaN)))
 
 (deftest between?-test
-  (testing "value within range"
-    (is (pred/between? 5 1 10)))
-  (testing "value at lower bound"
-    (is (pred/between? 1 1 10)))
-  (testing "value at upper bound"
-    (is (pred/between? 10 1 10)))
-  (testing "value below range"
-    (is (not (pred/between? 0 1 10))))
-  (testing "value above range"
-    (is (not (pred/between? 11 1 10)))))
+  (are [value] (true? (pred/between? value 1 10))
+    1 5 10 1.5)
+  (are [value] (false? (pred/between? value 1 10))
+    0 11 nil "5" Double/NaN))
 
-;; ── Collection predicates ─────────────────────────────────────────────────────
+(deftest finite?-test
+  (are [value] (true? (pred/finite? value))
+    0 -1 1.5 1/3 (bigdec 2.5) Float/MAX_VALUE)
+  (are [value] (false? (pred/finite? value))
+    Double/NaN Double/POSITIVE_INFINITY Double/NEGATIVE_INFINITY
+    Float/NaN nil "1" :a))
 
-(deftest non-empty?-test
-  (testing "non-empty vector"
-    (is (pred/non-empty? [1 2 3])))
-  (testing "non-empty string"
-    (is (pred/non-empty? "hello")))
-  (testing "non-empty map"
-    (is (pred/non-empty? {:a 1})))
-  (testing "empty vector is not non-empty"
-    (is (not (pred/non-empty? []))))
-  (testing "nil is not non-empty"
-    (is (not (pred/non-empty? nil)))))
+(deftest whole?-test
+  (are [value] (true? (pred/whole? value))
+    0 3 -7 3.0 6/2 (bigdec 4))
+  (are [value] (false? (pred/whole? value))
+    3.5 1/3 Double/NaN Double/POSITIVE_INFINITY nil "3"))
 
-(deftest has-min-count?-test
-  (testing "collection meets min count"
-    (is (pred/has-min-count? [1 2 3] 2)))
-  (testing "collection exactly at min"
-    (is (pred/has-min-count? [1 2] 2)))
-  (testing "collection below min"
-    (is (not (pred/has-min-count? [1] 2)))))
+;; ── Collections ──────────────────────────────────────────────────────────
 
-(deftest has-max-count?-test
-  (testing "collection within max count"
-    (is (pred/has-max-count? [1 2] 5)))
-  (testing "collection exactly at max"
-    (is (pred/has-max-count? [1 2 3] 3)))
-  (testing "collection exceeds max"
-    (is (not (pred/has-max-count? [1 2 3 4] 3)))))
+(deftest collection-test
+  (testing "non-empty?"
+    (are [value] (true? (pred/non-empty? value))
+      [1] "a" {:a 1} #{1} '(1))
+    (are [value] (false? (pred/non-empty? value))
+      [] "" {} #{} nil 42))
 
-(deftest contains-key?-test
-  (testing "map contains key"
-    (is (pred/contains-key? {:name "Alice"} :name)))
-  (testing "map does not contain key"
-    (is (not (pred/contains-key? {:name "Alice"} :age))))
-  (testing "nil map returns false"
-    (is (not (pred/contains-key? nil :name))))
-  (testing "non-map returns false"
-    (is (not (pred/contains-key? "string" :name)))))
+  (testing "has-min-count?"
+    (is (true? (pred/has-min-count? [1 2 3] 3)))
+    (is (false? (pred/has-min-count? [1 2] 3)))
+    (is (false? (pred/has-min-count? nil 0))))
 
-;; ── Brazilian document predicates ─────────────────────────────────────────────
+  (testing "has-max-count?"
+    (is (true? (pred/has-max-count? [1 2] 3)))
+    (is (true? (pred/has-max-count? "abc" 3)))
+    (is (false? (pred/has-max-count? [1 2 3 4] 3)))
+    (is (false? (pred/has-max-count? 42 3))))
+
+  (testing "contains-key?"
+    (is (true? (pred/contains-key? {:a nil} :a)))
+    (is (false? (pred/contains-key? {:a 1} :b)))
+    (is (false? (pred/contains-key? [:a] :a)))
+    (is (false? (pred/contains-key? nil :a)))))
+
+;; ── Brazilian documents ──────────────────────────────────────────────────
 
 (deftest cpf?-test
-  (testing "valid CPF formatted"
-    (is (pred/cpf? "529.982.247-25")))
-  (testing "valid CPF raw"
-    (is (pred/cpf? "52998224725")))
-  (testing "invalid CPF — all same digits"
-    (is (not (pred/cpf? "111.111.111-11"))))
-  (testing "invalid CPF — wrong check digits"
-    (is (not (pred/cpf? "123.456.789-00"))))
-  (testing "nil is invalid"
-    (is (not (pred/cpf? nil))))
-  (testing "too short is invalid"
-    (is (not (pred/cpf? "1234567890")))))
+  (are [value] (true? (pred/cpf? value))
+    "529.982.247-25" "52998224725")
+  (are [value] (false? (pred/cpf? value))
+    "529.982.247-26"
+    "111.111.111-11"
+    "00000000000"
+    "529.982.247-2"
+    "529982247-25"
+    "abc52998224725"
+    "529.982.247-25 "
+    nil 52998224725))
 
 (deftest cnpj?-test
-  (testing "valid CNPJ formatted"
-    (is (pred/cnpj? "11.222.333/0001-81")))
-  (testing "valid CNPJ raw"
-    (is (pred/cnpj? "11222333000181")))
-  (testing "invalid CNPJ — all same digits"
-    (is (not (pred/cnpj? "00.000.000/0000-00"))))
-  (testing "invalid CNPJ — wrong check digits"
-    (is (not (pred/cnpj? "11.222.333/0001-00"))))
-  (testing "nil is invalid"
-    (is (not (pred/cnpj? nil)))))
+  (are [value] (true? (pred/cnpj? value))
+    "11.222.333/0001-81" "11222333000181")
+  (are [value] (false? (pred/cnpj? value))
+    "11.222.333/0001-82"
+    "00.000.000/0000-00"
+    "11222333000180"
+    "11.222.333/0001-8"
+    "11.222.333-0001/81"
+    nil 11222333000181))
 
 (deftest cep?-test
-  (testing "valid CEP formatted"
-    (is (pred/cep? "01310-100")))
-  (testing "valid CEP raw"
-    (is (pred/cep? "01310100")))
-  (testing "invalid CEP — too short"
-    (is (not (pred/cep? "0131010"))))
-  (testing "nil is invalid"
-    (is (not (pred/cep? nil)))))
+  (are [value] (true? (pred/cep? value))
+    "01310-100" "01310100")
+  (are [value] (false? (pred/cep? value))
+    "0131-100" "01310-10" "013101000" "abcde-fgh" nil))
 
 (deftest phone-br?-test
-  (testing "valid mobile with DDD"
-    (is (pred/phone-br? "(11) 99999-9999")))
-  (testing "valid landline with DDD"
-    (is (pred/phone-br? "(11) 3333-4444")))
-  (testing "invalid phone — too short"
-    (is (not (pred/phone-br? "9999"))))
-  (testing "nil is invalid"
-    (is (not (pred/phone-br? nil)))))
+  (are [value] (true? (pred/phone-br? value))
+    "(11) 98765-4321" "11987654321" "+55 11 98765-4321" "98765-4321"
+    "(11) 3456-7890" "1134567890" "3456-7890")
+  (are [value] (false? (pred/phone-br? value))
+    "(11 98765-4321" "11) 98765-4321" "12345" "98765-432" "abc" nil))
 
-;; ── Composition ───────────────────────────────────────────────────────────────
+;; ── Composition ──────────────────────────────────────────────────────────
 
-(deftest all?-test
-  (testing "all predicates pass"
-    (is (pred/all? "test@email.com" pred/present? pred/email?)))
-  (testing "one predicate fails"
-    (is (not (pred/all? "" pred/present? pred/email?))))
-  (testing "all predicates fail"
-    (is (not (pred/all? nil pred/present? pred/email?)))))
+(deftest composition-test
+  (testing "all-of?"
+    (is (true? (pred/all-of? "a@b.co" pred/present? pred/email?)))
+    (is (false? (pred/all-of? "a@b" pred/present? pred/email?)))
+    (is (true? (pred/all-of? "anything"))))
 
-(deftest any?-test
-  (testing "one predicate passes"
-    (is (pred/any? "52998224725" pred/email? pred/cpf?)))
-  (testing "all predicates fail"
-    (is (not (pred/any? "invalid" pred/email? pred/uuid?))))
-  (testing "all predicates pass"
-    (is (pred/any? "test@email.com" pred/present? pred/email?))))
+  (testing "any-of?"
+    (is (true? (pred/any-of? "529.982.247-25" pred/cnpj? pred/cpf?)))
+    (is (false? (pred/any-of? "nope" pred/cnpj? pred/cpf?)))
+    (is (false? (pred/any-of? "anything"))))
 
-(deftest none?-test
-  (testing "no predicates pass"
-    (is (pred/none? "not-an-email" pred/email? pred/uuid?)))
-  (testing "one predicate passes"
-    (is (not (pred/none? "test@email.com" pred/email? pred/uuid?))))
-  (testing "all predicates pass"
-    (is (not (pred/none? "test@email.com" pred/present? pred/email?)))))
+  (testing "none-of?"
+    (is (true? (pred/none-of? "nope" pred/cnpj? pred/cpf?)))
+    (is (false? (pred/none-of? "529.982.247-25" pred/cnpj? pred/cpf?)))
+    (is (true? (pred/none-of? "anything"))))
 
-(deftest complement-pred-test
-  (testing "complement of blank? returns true for non-blank"
-    (is ((pred/complement-pred pred/blank?) "hello")))
-  (testing "complement of blank? returns false for blank"
-    (is (not ((pred/complement-pred pred/blank?) ""))))
-  (testing "complement of present? returns true for nil"
-    (is ((pred/complement-pred pred/present?) nil))))
+  (testing "complement-pred"
+    (is (false? ((pred/complement-pred pred/blank?) "")))
+    (is (true? ((pred/complement-pred pred/blank?) "hi")))))

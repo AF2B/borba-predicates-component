@@ -1,239 +1,337 @@
 (ns borba.predicates
-  "Predicate functions for common validation scenarios.
+  "Composable, pure predicates for validating strings, numbers, collections
+   and Brazilian documents (CPF, CNPJ, CEP and phone numbers).
 
-   Provides composable, pure predicates for validating strings, numbers,
-   collections, and Brazilian-specific documents (CPF, CNPJ, CEP).
-
-   ── Usage ────────────────────────────────────────────────────────────────────
+   Every predicate is total: it takes any value, returns true or false and
+   never throws, so a validator can run them on whatever arrives from the
+   outside.
 
      (require '[borba.predicates :as pred])
 
-     (pred/email? \"user@example.com\")   ;; => true
-     (pred/cpf? \"123.456.789-09\")       ;; => true or false (digit check)
-     (pred/uuid? \"550e8400-...\")        ;; => true
+     (pred/email? \"user@example.com\")  ;; => true
+     (pred/cpf? \"529.982.247-25\")      ;; => true
+     (pred/all-of? \"a@b.co\"
+                   pred/present?
+                   pred/email?)         ;; => true
 
-   ── Composition ──────────────────────────────────────────────────────────────
-
-     Use `all?`, `any?`, and `none?` to compose predicates:
-
-     (pred/all? \"test@email.com\" pred/present? pred/email?)
-     ;; => true only if both predicates pass
-
-   ── Extension ────────────────────────────────────────────────────────────────
-
-   Custom predicates can be registered via the multimethod in
+   Several names, such as `zero?`, say what a core function says but accept
+   any value; refer to them through an alias, never with :refer :all.
+   Custom predicates are registered with the multimethod in
    `borba.predicates.registry`."
-   (:require [clojure.string :as str]))
+  (:refer-clojure :exclude [uuid? zero?])
+  (:require
+   [clojure.string :as str]))
 
-;; ── String predicates ─────────────────────────────────────────────────────────
+(set! *warn-on-reflection* true)
 
-(defn blank?
-  "Returns true if s is nil, empty, or contains only whitespace."
-  [s]
-  (or (nil? s)
-      (and (string? s) (str/blank? s))))
+;; ── Limits and patterns ─────────────────────────────────────────────────
 
-(defn present?
-  "Returns true if s is a non-nil, non-blank string."
-  [s]
-  (and (string? s) (not (str/blank? s))))
+(def ^:private max-email-length
+  "The longest e-mail address a mailbox can have, by RFC 5321."
+  254)
 
-(defn min-length?
-  "Returns true if s has at least n characters."
-  [s n]
-  (and (string? s) (>= (count s) n)))
+(def ^:private max-url-length 2048)
 
-(defn max-length?
-  "Returns true if s has at most n characters."
-  [s n]
-  (and (string? s) (<= (count s) n)))
+(def ^:private modulus 11)
+(def ^:private first-valid-remainder 2)
 
-(defn length-between?
-  "Returns true if s length is between min and max (inclusive)."
-  [s min max]
-  (and (min-length? s min) (max-length? s max)))
-
-(defn matches?
-  "Returns true if s matches the given regex pattern."
-  [s pattern]
-  (and (string? s) (boolean (re-matches pattern s))))
-
-;; ── Format predicates ─────────────────────────────────────────────────────────
+(def ^:private cpf-first-weights [10 9 8 7 6 5 4 3 2])
+(def ^:private cpf-second-weights [11 10 9 8 7 6 5 4 3 2])
+(def ^:private cnpj-first-weights [5 4 3 2 9 8 7 6 5 4 3 2])
+(def ^:private cnpj-second-weights [6 5 4 3 2 9 8 7 6 5 4 3 2])
 
 (def ^:private email-pattern
   #"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
-(defn email?
-  "Returns true if s is a valid e-mail address."
-  [s]
-  (matches? s email-pattern))
-
 (def ^:private uuid-pattern
-  #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-
-(defn uuid?
-  "Returns true if s is a valid UUID string."
-  [s]
-  (matches? s uuid-pattern))
+  #"^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
 
 (def ^:private url-pattern
-  #"^(https?://)[^\s/$.?#].[^\s]*$")
+  #"^https?://[^\s/$.?#][^\s]*$")
 
-(defn url?
-  "Returns true if s is a valid HTTP/HTTPS URL."
-  [s]
-  (matches? s url-pattern))
+(def ^:private cpf-pattern
+  #"^(\d{3}\.\d{3}\.\d{3}-\d{2}|\d{11})$")
 
-;; ── Number predicates ─────────────────────────────────────────────────────────
-
-(defn positive?
-  "Returns true if n is a positive number (> 0)."
-  [n]
-  (and (number? n) (pos? n)))
-
-(defn negative?
-  "Returns true if n is a negative number (< 0)."
-  [n]
-  (and (number? n) (neg? n)))
-
-(defn zero?
-  "Returns true if n is zero."
-  [n]
-  (and (number? n) (clojure.core/zero? n)))
-
-(defn non-negative?
-  "Returns true if n is a number >= 0."
-  [n]
-  (and (number? n) (>= n 0)))
-
-(defn between?
-  "Returns true if n is between min and max (inclusive)."
-  [n min max]
-  (and (number? n) (>= n min) (<= n max)))
-
-;; ── Collection predicates ─────────────────────────────────────────────────────
-
-(defn non-empty?
-  "Returns true if coll is a non-nil, non-empty collection or string."
-  [coll]
-  (and (some? coll)
-       (not (empty? coll))))
-
-(defn has-min-count?
-  "Returns true if coll has at least n elements."
-  [coll n]
-  (and (some? coll) (>= (count coll) n)))
-
-(defn has-max-count?
-  "Returns true if coll has at most n elements."
-  [coll n]
-  (and (some? coll) (<= (count coll) n)))
-
-(defn contains-key?
-  "Returns true if map m contains key k."
-  [m k]
-  (and (map? m) (contains? m k)))
-
-;; ── Brazilian document predicates ─────────────────────────────────────────────
-
-(defn- digits-only
-  "Strips all non-digit characters from s."
-  [s]
-  (when (string? s)
-    (clojure.string/replace s #"\D" "")))
-
-(defn- cpf-digits-valid?
-  "Validates CPF check digits (last 2 digits) against the first 9."
-  [digits]
-  (let [ns (mapv #(Character/digit % 10) digits)
-        d1 (mod (- 11 (mod (reduce + (map * ns (range 10 1 -1))) 11)) 11)
-        d1 (if (>= d1 10) 0 d1)
-        d2 (mod (- 11 (mod (reduce + (map * (conj (vec (take 9 ns)) d1) (range 11 1 -1))) 11)) 11)
-        d2 (if (>= d2 10) 0 d2)]
-    (and (= d1 (nth ns 9))
-         (= d2 (nth ns 10)))))
-
-(defn cpf?
-  "Returns true if s is a valid CPF number.
-   Accepts formatted (000.000.000-00) or raw (00000000000) input.
-   Validates both structure and check digits."
-  [s]
-  (when-let [d (digits-only s)]
-    (and (= 11 (count d))
-         (not (apply = (seq d)))
-         (cpf-digits-valid? d))))
-
-(defn- cnpj-digits-valid?
-  "Validates CNPJ check digits against the first 12 digits."
-  [digits]
-  (let [ns    (mapv #(Character/digit % 10) digits)
-        w1    [5 4 3 2 9 8 7 6 5 4 3 2]
-        w2    [6 5 4 3 2 9 8 7 6 5 4 3 2]
-        calc  (fn [ws]
-                (let [r (mod (reduce + (map * ns ws)) 11)]
-                  (if (< r 2) 0 (- 11 r))))
-        d1    (calc w1)
-        d2    (calc w2)]
-    (and (= d1 (nth ns 12))
-         (= d2 (nth ns 13)))))
-
-(defn cnpj?
-  "Returns true if s is a valid CNPJ number.
-   Accepts formatted (00.000.000/0001-00) or raw (00000000000100) input.
-   Validates both structure and check digits."
-  [s]
-  (when-let [d (digits-only s)]
-    (and (= 14 (count d))
-         (not (apply = (seq d)))
-         (cnpj-digits-valid? d))))
+(def ^:private cnpj-pattern
+  #"^(\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}|\d{14})$")
 
 (def ^:private cep-pattern #"^\d{5}-?\d{3}$")
 
-(defn cep?
-  "Returns true if s is a valid Brazilian CEP (postal code).
-   Accepts formatted (00000-000) or raw (00000000) input."
-  [s]
-  (matches? s cep-pattern))
-
 (def ^:private phone-br-pattern
-  #"^(\+55\s?)?(\(?\d{2}\)?\s?)?(9\d{4}|\d{4})-?\d{4}$")
+  #"^(\+55\s?)?(\(\d{2}\)|\d{2})?\s?(9\d{4}|\d{4})-?\d{4}$")
+
+;; ── String predicates ───────────────────────────────────────────────────
+
+(defn blank?
+  "Returns true when the value is nil, an empty string or a string of only
+   whitespace.
+   - value: any value"
+  [value]
+  (or (nil? value)
+      (and (string? value) (str/blank? value))))
+
+(defn present?
+  "Returns true when the value is a string with something other than
+   whitespace in it.
+   - value: any value"
+  [value]
+  (and (string? value) (not (str/blank? value))))
+
+(defn min-length?
+  "Returns true when the value is a string of at least a given length.
+   - value: any value
+   - minimum: the least number of characters"
+  [value
+   minimum]
+  (and (string? value) (>= (count value) minimum)))
+
+(defn max-length?
+  "Returns true when the value is a string of at most a given length.
+   - value: any value
+   - maximum: the most number of characters"
+  [value
+   maximum]
+  (and (string? value) (<= (count value) maximum)))
+
+(defn length-between?
+  "Returns true when the value is a string whose length is within the bounds,
+   both included.
+   - value: any value
+   - minimum: the least number of characters
+   - maximum: the most number of characters"
+  [value
+   minimum
+   maximum]
+  (and (min-length? value minimum) (max-length? value maximum)))
+
+(defn matches?
+  "Returns true when the value is a string that the pattern matches entirely.
+   The pattern is the caller's: a pattern with nested repetition can take
+   exponential time on a hostile string, so bound the length first.
+   - value: any value
+   - pattern: a regular expression"
+  [value
+   pattern]
+  (and (string? value) (boolean (re-matches pattern value))))
+
+;; ── Format predicates ───────────────────────────────────────────────────
+
+(defn email?
+  "Returns true when the value is a plausible e-mail address of at most 254
+   characters. It checks the shape, not that the mailbox exists.
+   - value: any value"
+  [value]
+  (and (max-length? value max-email-length)
+       (matches? value email-pattern)))
+
+(defn uuid?
+  "Returns true when the value is a UUID, or a string in the canonical
+   8-4-4-4-12 hexadecimal form.
+   - value: any value"
+  [value]
+  (or (clojure.core/uuid? value)
+      (matches? value uuid-pattern)))
+
+(defn url?
+  "Returns true when the value is an http or https URL of at most 2048
+   characters.
+   - value: any value"
+  [value]
+  (and (max-length? value max-url-length)
+       (matches? value url-pattern)))
+
+;; ── Number predicates ───────────────────────────────────────────────────
+
+(defn positive?
+  "Returns true when the value is a number greater than zero.
+   - value: any value"
+  [value]
+  (and (number? value) (pos? value)))
+
+(defn negative?
+  "Returns true when the value is a number less than zero.
+   - value: any value"
+  [value]
+  (and (number? value) (neg? value)))
+
+(defn zero?
+  "Returns true when the value is a number equal to zero.
+   - value: any value"
+  [value]
+  (and (number? value) (clojure.core/zero? value)))
+
+(defn non-negative?
+  "Returns true when the value is a number that is not less than zero.
+   - value: any value"
+  [value]
+  (and (number? value) (>= value 0)))
+
+(defn between?
+  "Returns true when the value is a number within the bounds, both included.
+   - value: any value
+   - lower: the least value
+   - upper: the greatest value"
+  [value
+   lower
+   upper]
+  (and (number? value) (>= value lower) (<= value upper)))
+
+(defn finite?
+  "Returns true when the value is a number that is neither NaN nor infinite.
+   - value: any value"
+  [value]
+  (and (number? value)
+       (or (not (or (instance? Double value) (instance? Float value)))
+           (let [x (double value)]
+             (not (or (Double/isNaN x) (Double/isInfinite x)))))))
+
+(defn whole?
+  "Returns true when the value is a finite number with no fractional part,
+   whatever its type: 3, 3.0 and 6/2 are whole.
+   - value: any value"
+  [value]
+  (and (finite? value) (clojure.core/zero? (rem value 1))))
+
+;; ── Collection predicates ───────────────────────────────────────────────
+
+(defn- sized?
+  "Returns true when the value is a collection or a string, which is what
+   count and empty? are defined on here.
+   - value: any value"
+  [value]
+  (or (coll? value) (string? value)))
+
+(defn non-empty?
+  "Returns true when the value is a collection or a string with something in
+   it.
+   - value: any value"
+  [value]
+  (and (sized? value) (boolean (seq value))))
+
+(defn has-min-count?
+  "Returns true when the value is a collection or a string of at least a
+   given size.
+   - value: any value
+   - minimum: the least number of elements"
+  [value
+   minimum]
+  (and (sized? value) (>= (count value) minimum)))
+
+(defn has-max-count?
+  "Returns true when the value is a collection or a string of at most a given
+   size.
+   - value: any value
+   - maximum: the most number of elements"
+  [value
+   maximum]
+  (and (sized? value) (<= (count value) maximum)))
+
+(defn contains-key?
+  "Returns true when the value is a map that has the key.
+   - value: any value
+   - k: the key to look for"
+  [value
+   k]
+  (and (map? value) (contains? value k)))
+
+;; ── Brazilian documents ─────────────────────────────────────────────────
+
+(defn- digits-of
+  "Returns the digits of a string as numbers, ignoring the punctuation of a
+   document mask.
+   - text: a string of digits and mask characters"
+  [text]
+  (->> text
+       (filter #(<= (int \0) (int %) (int \9)))
+       (mapv #(- (int %) (int \0)))))
+
+(defn- check-digit
+  "Returns the check digit of the weighed digits, by the modulo 11 rule that
+   CPF and CNPJ share: the remainder of the weighed sum, subtracted from 11,
+   and 0 when the remainder is 0 or 1.
+   - digits: the digits to weigh
+   - weights: one weight for each digit that is used"
+  [digits
+   weights]
+  (let [remainder (mod (reduce + (map * digits weights)) modulus)]
+    (if (< remainder first-valid-remainder)
+      0
+      (- modulus remainder))))
+
+(defn- valid-document?
+  "Returns true when a masked or raw document is well formed, is not the same
+   digit repeated, and carries the two check digits its weights compute.
+   - text: the document as given
+   - pattern: the shapes the document may be written in
+   - first-weights: the weights of the first check digit
+   - second-weights: the weights of the second check digit"
+  [text
+   pattern
+   first-weights
+   second-weights]
+  (and (matches? text pattern)
+       (let [digits (digits-of text)
+             base   (count first-weights)]
+         (and (not (apply = digits))
+              (= (digits base) (check-digit digits first-weights))
+              (= (digits (inc base))
+                 (check-digit digits second-weights))))))
+
+(defn cpf?
+  "Returns true when the value is a valid CPF, written as 000.000.000-00 or as
+   eleven digits, with correct check digits and not a repeated digit.
+   - value: any value"
+  [value]
+  (valid-document? value cpf-pattern cpf-first-weights cpf-second-weights))
+
+(defn cnpj?
+  "Returns true when the value is a valid CNPJ, written as
+   00.000.000/0000-00 or as fourteen digits, with correct check digits and not
+   a repeated digit.
+   - value: any value"
+  [value]
+  (valid-document? value cnpj-pattern cnpj-first-weights cnpj-second-weights))
+
+(defn cep?
+  "Returns true when the value is a Brazilian postal code, written as
+   00000-000 or as eight digits.
+   - value: any value"
+  [value]
+  (matches? value cep-pattern))
 
 (defn phone-br?
-  "Returns true if s is a valid Brazilian phone number.
-   Accepts mobile (9 digits) and landline (8 digits), with or without DDD/country code."
-  [s]
-  (matches? s phone-br-pattern))
+  "Returns true when the value is a Brazilian phone number: a mobile (nine
+   digits, starting with 9) or a landline (eight), with or without the area
+   code, which may be in parentheses, and with or without +55.
+   - value: any value"
+  [value]
+  (matches? value phone-br-pattern))
 
-;; ── Composition ───────────────────────────────────────────────────────────────
+;; ── Composition ─────────────────────────────────────────────────────────
 
-(defn all?
-  "Returns true if value satisfies all given predicates.
-
-   (all? \"test@email.com\" present? email?)
-   ;; => true only if both pass"
+(defn all-of?
+  "Returns true when the value satisfies every predicate.
+   - value: the value to check
+   - preds: the predicates it has to satisfy"
   [value & preds]
-  (every? #(% value) preds))
+  (every? #(boolean (% value)) preds))
 
-(defn any?
-  "Returns true if value satisfies at least one of the given predicates.
-
-   (any? value cpf? cnpj?)
-   ;; => true if either passes"
+(defn any-of?
+  "Returns true when the value satisfies at least one predicate.
+   - value: the value to check
+   - preds: the predicates, one of which it has to satisfy"
   [value & preds]
   (boolean (some #(% value) preds)))
 
-(defn none?
-  "Returns true if value satisfies none of the given predicates.
-
-   (none? value blank? nil?)
-   ;; => true only if both fail"
+(defn none-of?
+  "Returns true when the value satisfies no predicate.
+   - value: the value to check
+   - preds: the predicates it must not satisfy"
   [value & preds]
-  (not (boolean (some #(% value) preds))))
+  (not (apply any-of? value preds)))
 
 (defn complement-pred
-  "Returns a predicate that is the logical complement of pred.
-
-   ((complement-pred blank?) \"\") ;; => false
-   ((complement-pred blank?) \"hi\") ;; => true"
+  "Returns a predicate that is true exactly when the given one is false.
+   - pred: the predicate to complement"
   [pred]
   (fn [value] (not (pred value))))
