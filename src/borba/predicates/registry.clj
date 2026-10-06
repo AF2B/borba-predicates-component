@@ -1,37 +1,29 @@
 (ns borba.predicates.registry
-  "Multimethod registry for custom predicates.
+  "A registry of custom predicates, keyed by keyword, for the rules that belong
+   to a domain and not to this library.
 
-   ── Pattern ───────────────────────────────────────────────────────────────────
-
-   Register domain-specific predicates in your service by implementing
-   this multimethod:
+   Register one with a method of `predicate`:
 
      (require '[borba.predicates.registry :as registry])
 
      (defmethod registry/predicate :valid-plan-code [_ value]
-       (boolean (re-matches #\"^PLN-\\d{6}$\" value)))
+       (boolean (re-matches #\"PLN-\\d{6}\" value)))
 
-     (defmethod registry/predicate :active-employee [_ {:keys [status]}]
-       (= :active status))
+     (registry/predicate :valid-plan-code \"PLN-123456\")
+     ;; => true
 
-   The dispatch value is a keyword identifying the predicate.
-
-   ── Calling registered predicates ────────────────────────────────────────────
-
-     (registry/predicate :valid-plan-code \"PLN-123456\")  ;; => true
-     (registry/predicate :active-employee {:status :active}) ;; => true
-
-   ── Listing registered predicates ────────────────────────────────────────────
-
-     (keys (methods registry/predicate))
-     ;; => (:valid-plan-code :active-employee ...)")
+   The registered keys are `(keys (methods registry/predicate))`.")
 
 (defmulti predicate
-  "Registry of custom domain predicates.
-   Dispatch key is the predicate keyword (e.g. :valid-plan-code).
-   Returns true or false."
+  "Calls the custom predicate registered under a keyword, and throws when none
+   is registered.
+   - dispatch-key: the keyword the predicate was registered under
+   - value: the value to check"
   (fn [dispatch-key _value] dispatch-key))
 
-(defmethod predicate :default [k _]
-  (throw (ex-info (str "[predicates] No predicate registered for: " k)
-                  {:dispatch-key k})))
+(defmethod predicate :default
+  [dispatch-key _value]
+  (throw (ex-info (str "[predicates] No predicate registered for: "
+                       dispatch-key)
+                  {:error        ::no-predicate-registered
+                   :dispatch-key dispatch-key})))
