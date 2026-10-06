@@ -1,15 +1,23 @@
 (ns borba.predicates.registry-test
-  (:require [clojure.test :refer [deftest is testing]]
-            [borba.predicates.registry :as registry]))
+  (:require
+   [borba.predicates.registry :as registry]
+   [clojure.test :refer [deftest is testing]]))
 
-(defmethod registry/predicate :test/positive-even [_ n]
+(defmethod registry/predicate :test/positive-even
+  [_ n]
   (and (number? n) (pos? n) (even? n)))
 
-(deftest registry-predicate-test
-  (testing "registered predicate dispatches correctly"
-    (is (registry/predicate :test/positive-even 4)))
-  (testing "registered predicate returns false when condition fails"
-    (is (not (registry/predicate :test/positive-even 3))))
-  (testing "unregistered predicate throws ex-info"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (registry/predicate :test/unknown-predicate "value")))))
+(deftest predicate-test
+  (testing "a registered predicate is called with the value"
+    (is (true? (registry/predicate :test/positive-even 4)))
+    (is (false? (registry/predicate :test/positive-even 3))))
+
+  (testing "the registered keys can be listed"
+    (is (contains? (methods registry/predicate) :test/positive-even)))
+
+  (testing "an unregistered key throws data that names it"
+    (let [thrown (try (registry/predicate :test/unknown "value")
+                      (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :borba.predicates.registry/no-predicate-registered
+             (:error (ex-data thrown))))
+      (is (= :test/unknown (:dispatch-key (ex-data thrown)))))))
